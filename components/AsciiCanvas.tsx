@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { AsciiOptions } from '../types';
 import { getAsciiChar } from '../utils/asciiConverter';
 import { playStartupSound, playScanSound, startAmbientHum, stopAmbientHum } from '../utils/soundEffects';
-import { ScanEye, Camera } from 'lucide-react';
+import { ScanEye, Camera, FileText } from 'lucide-react';
 
 interface AsciiCanvasProps {
   options: AsciiOptions;
@@ -14,6 +14,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenCanvasRef = useRef<HTMLCanvasElement>(null); // For processing pixels
   const prevFrameRef = useRef<Float32Array | null>(null); // Store previous frame for smoothing
+  const asciiTextRef = useRef('');
   const animationRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
 
@@ -214,10 +215,12 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
 
       // 5. Build and Draw ASCII
       const contrastFactor = (259 * (options.contrast * 255 + 255)) / (255 * (259 - options.contrast * 255));
+      const asciiRows: string[] = new Array(rows);
 
       if (options.colorMode === 'color') {
           // Full Color Mode
           for (let y = 0; y < rows; y++) {
+            let rowText = "";
             for (let x = 0; x < cols; x++) {
                 const offset = (y * cols + x) * 4;
                 const r = data[offset];
@@ -231,10 +234,12 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
                 brightness = Math.max(0, Math.min(255, brightness));
 
                 const char = getAsciiChar(brightness, options.density);
+                rowText += char;
                 
                 ctx.fillStyle = `rgb(${r},${g},${b})`;
                 ctx.fillText(char, x * charWidth, y * charHeight);
             }
+            asciiRows[y] = rowText;
           }
       } else {
           // Monochromatic / Matrix Modes
@@ -257,9 +262,12 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
 
                 rowText += getAsciiChar(brightness, options.density);
             }
+            asciiRows[y] = rowText;
             ctx.fillText(rowText, 0, y * charHeight);
           }
       }
+
+      asciiTextRef.current = asciiRows.join('\n');
 
       animationRef.current = requestAnimationFrame(renderLoop);
     };
@@ -296,6 +304,23 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
     }
   };
 
+  const handleTextDownloadClick = () => {
+    if (!asciiTextRef.current) {
+      return;
+    }
+
+    playScanSound();
+    const blob = new Blob([asciiTextRef.current], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ascii_world_${Date.now()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="relative w-full h-full bg-black">
         {error && (
@@ -317,6 +342,14 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
         
         {/* Floating Controls Container */}
         <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-8 z-40">
+            <button 
+                onClick={handleTextDownloadClick}
+                className="bg-black/60 hover:bg-green-900/80 text-green-400 border border-green-500/50 p-4 rounded-full backdrop-blur-md transition-all active:scale-95 hover:scale-105 hover:shadow-[0_0_15px_rgba(0,255,0,0.3)]"
+                title="Save ASCII Text"
+            >
+                <FileText className="w-6 h-6" />
+            </button>
+
             {/* Screenshot Button */}
             <button 
                 onClick={handleScreenshotClick}
@@ -329,11 +362,11 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
             {/* Scan & Analyze Button (Primary) */}
             <button 
                 onClick={handleCaptureClick}
-                className="bg-green-500/20 hover:bg-green-500/40 text-green-400 border border-green-500/50 p-6 rounded-full backdrop-blur-md transition-all active:scale-95 group relative hover:shadow-[0_0_25px_rgba(0,255,0,0.5)]"
+                className="bg-green-500/20 hover:bg-green-500/40 text-green-400 border border-green-500/50 p-4 rounded-full backdrop-blur-md transition-all active:scale-95 group relative hover:shadow-[0_0_25px_rgba(0,255,0,0.5)]"
                 title="Scan & Analyze"
             >
                 <div className="absolute inset-0 rounded-full border border-green-500 opacity-50 animate-ping"></div>
-                <ScanEye className="w-8 h-8" />
+                <ScanEye className="w-6 h-6" />
             </button>
         </div>
     </div>
