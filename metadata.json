@@ -1,0 +1,8 @@
+{
+  "name": "ASCII World",
+  "description": "Real-time camera to ASCII art converter with AI-powered scene analysis.",
+  "author": "Rishabh Gokhe",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
