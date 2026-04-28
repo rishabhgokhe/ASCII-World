@@ -2,7 +2,8 @@ import React, { useRef, useEffect, useState } from 'react';
 import { AsciiOptions } from '../types';
 import { getAsciiChar } from '../utils/asciiConverter';
 import { playStartupSound, playScanSound, startAmbientHum, stopAmbientHum } from '../utils/soundEffects';
-import { ScanEye, Camera, FileText } from 'lucide-react';
+import { ScanEye, Camera, FileText, Upload, Video } from 'lucide-react';
+import { uploadOriginalImageToCloudinary } from '../services/cloudinaryService';
 
 interface AsciiCanvasProps {
   options: AsciiOptions;
@@ -11,12 +12,17 @@ interface AsciiCanvasProps {
 
 export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenCanvasRef = useRef<HTMLCanvasElement>(null); // For processing pixels
   const prevFrameRef = useRef<Float32Array | null>(null); // Store previous frame for smoothing
+  const uploadedImageUrlRef = useRef<string | null>(null);
   const asciiTextRef = useRef('');
   const animationRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
+  const [sourceType, setSourceType] = useState<'camera' | 'image'>('camera');
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -94,6 +100,9 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
     startCamera();
 
     return () => {
+      if (uploadedImageUrlRef.current) {
+        URL.revokeObjectURL(uploadedImageUrlRef.current);
+      }
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
@@ -129,11 +138,15 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
   useEffect(() => {
     const renderLoop = () => {
       const video = videoRef.current;
+      const image = imageRef.current;
       const canvas = canvasRef.current;
       const hiddenCanvas = hiddenCanvasRef.current;
+      const renderSource = sourceType === 'image' ? image : video;
+      const sourceReady = sourceType === 'image'
+        ? Boolean(image && image.complete && image.naturalWidth > 0)
+        : Boolean(video && video.readyState >= 2);
       
-      // Check if video has enough data. readyState >= 2 is HAVE_CURRENT_DATA
-      if (!video || !canvas || !hiddenCanvas || video.readyState < 2) {
+      if (!renderSource || !canvas || !hiddenCanvas || !sourceReady) {
         animationRef.current = requestAnimationFrame(renderLoop);
         return;
       }
@@ -166,13 +179,17 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
         prevFrameRef.current = null; // Reset smoothing buffer on resize
       }
 
-      // 1. Draw video to small hidden canvas
-      // We flip horizontally for a natural mirror effect
-      hiddenCtx.save();
-      hiddenCtx.translate(cols, 0);
-      hiddenCtx.scale(-1, 1);
-      hiddenCtx.drawImage(video, 0, 0, cols, rows);
-      hiddenCtx.restore();
+      // 1. Draw source to small hidden canvas
+      if (sourceType === 'camera') {
+        // We flip the live camera horizontally for a natural mirror effect.
+        hiddenCtx.save();
+        hiddenCtx.translate(cols, 0);
+        hiddenCtx.scale(-1, 1);
+        hiddenCtx.drawImage(renderSource, 0, 0, cols, rows);
+        hiddenCtx.restore();
+      } else {
+        hiddenCtx.drawImage(renderSource, 0, 0, cols, rows);
+      }
       
       // 2. Get pixel data
       const frameData = hiddenCtx.getImageData(0, 0, cols, rows);
@@ -280,7 +297,7 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
             cancelAnimationFrame(animationRef.current);
         }
     };
-  }, [options]);
+  }, [options, sourceType]);
 
   const handleCaptureClick = () => {
     if (canvasRef.current) {
@@ -321,11 +338,67 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
     URL.revokeObjectURL(url);
   };
 
+  const handleImageUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleUseCameraClick = () => {
+    setSourceType('camera');
+    setUploadStatus(null);
+    prevFrameRef.current = null;
+  };
+
+  const handleImageFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file.');
+      event.target.value = '';
+      return;
+    }
+
+    setError(null);
+    prevFrameRef.current = null;
+
+    if (uploadedImageUrlRef.current) {
+      URL.revokeObjectURL(uploadedImageUrlRef.current);
+    }
+
+    const localUrl = URL.createObjectURL(file);
+    uploadedImageUrlRef.current = localUrl;
+
+    if (imageRef.current) {
+      imageRef.current.src = localUrl;
+    }
+
+    setSourceType('image');
+    setUploadStatus('Hold on.. We are generating..');
+
+    try {
+      await uploadOriginalImageToCloudinary(file);
+      setUploadStatus('Here is your ascii art.');
+    } catch (uploadError) {
+      console.error('Failed to generate:', uploadError);
+      setUploadStatus('ASCII preview loaded.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   return (
     <div className="relative w-full h-full bg-black">
         {error && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-red-500 z-50">
                 <p>{error}</p>
+            </div>
+        )}
+        {uploadStatus && (
+            <div className="absolute top-24 left-1/2 z-40 -translate-x-1/2 rounded-full border border-green-500/20 bg-black/72 px-4 py-2 text-[11px] font-mono uppercase tracking-[0.18em] text-green-400 shadow-[0_18px_45px_rgba(0,0,0,0.45),0_0_24px_rgba(0,255,65,0.08)] backdrop-blur-xl">
+                {uploadStatus}
             </div>
         )}
         {/* Important: Video must not be display:none for textures to update in some browsers. 
@@ -337,11 +410,41 @@ export const AsciiCanvas: React.FC<AsciiCanvasProps> = ({ options, onCapture }) 
             autoPlay 
             muted 
         />
+        <img
+            ref={imageRef}
+            alt="Uploaded source"
+            className="absolute top-0 left-0 opacity-0 pointer-events-none -z-10 w-1 h-1"
+        />
+        <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageFileChange}
+            className="hidden"
+        />
         <canvas ref={hiddenCanvasRef} className="hidden" />
         <canvas ref={canvasRef} className="block w-full h-full" />
         
         {/* Floating Controls Container */}
-        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-8 z-40">
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 flex items-center gap-6 z-40">
+            <button 
+                onClick={handleImageUploadClick}
+                className="bg-black/60 hover:bg-green-900/80 text-green-400 border border-green-500/50 p-4 rounded-full backdrop-blur-md transition-all active:scale-95 hover:scale-105 hover:shadow-[0_0_15px_rgba(0,255,0,0.3)]"
+                title="Upload Image"
+            >
+                <Upload className="w-6 h-6" />
+            </button>
+
+            {sourceType === 'image' && (
+                <button 
+                    onClick={handleUseCameraClick}
+                    className="bg-black/60 hover:bg-green-900/80 text-green-400 border border-green-500/50 p-4 rounded-full backdrop-blur-md transition-all active:scale-95 hover:scale-105 hover:shadow-[0_0_15px_rgba(0,255,0,0.3)]"
+                    title="Return to Live Camera"
+                >
+                    <Video className="w-6 h-6" />
+                </button>
+            )}
+
             <button 
                 onClick={handleTextDownloadClick}
                 className="bg-black/60 hover:bg-green-900/80 text-green-400 border border-green-500/50 p-4 rounded-full backdrop-blur-md transition-all active:scale-95 hover:scale-105 hover:shadow-[0_0_15px_rgba(0,255,0,0.3)]"

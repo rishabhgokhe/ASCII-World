@@ -60,6 +60,9 @@ ASCII World is a real-time camera-to-ASCII art web app that transforms your live
    Create a `.env.local` file in the project root and add:
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
+   CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
+   CLOUDINARY_UPLOAD_PRESET=your_unsigned_upload_preset
+   CLOUDINARY_FOLDER=ascii-world
    ```
 
 5. **Run the Development Server**
